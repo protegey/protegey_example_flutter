@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:protegey_sdk/protegey_sdk.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -159,6 +160,17 @@ class _HomePageState extends State<HomePage> {
       setState(() => _log = 'Set an API key first.');
       return;
     }
+
+    // Ask up front, before the webview ever loads — relying only on the webview's own
+    // permission-request bridge to the OS is less predictable across Android OEMs/versions than
+    // just getting the OS permission granted first and letting the webview inherit it.
+    final cameraStatus = await Permission.camera.request();
+    if (!cameraStatus.isGranted) {
+      setState(() => _log = 'Camera permission denied — identity verification needs camera access to scan your document and face.');
+      return;
+    }
+
+    if (!mounted) return;
     try {
       // One call: starts the session AND shows it in a draggable bottom sheet — the user never
       // leaves this app, and there's no UI code to write for that on our end.
