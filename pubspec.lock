@@ -373,7 +373,7 @@ packages:
     description:
       path: "."
       ref: main
-      resolved-ref: "156d0143c247d34445dc060d939a28f90643dc45"
+      resolved-ref: "44b1ba6c96b8f04184af14fb2ee6066bee5fe04e"
       url: "https://github.com/protegey/protegey_flutter_sdk.git"
     source: git
     version: "0.2.1"
