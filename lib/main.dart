@@ -48,7 +48,6 @@ class _HomePageState extends State<HomePage> {
   final _apiKeyController = TextEditingController();
   final _baseUrlController = TextEditingController();
   String _log = 'Waiting for device.identify()…';
-  String? _visitorId;
 
   @override
   void initState() {
@@ -102,36 +101,17 @@ class _HomePageState extends State<HomePage> {
     }
     try {
       final result = await protegey.device.identify(externalCustomerId: _customerId);
-      setState(() {
-        _visitorId = result.visitorId;
-        _log = 'device.identify() -> visitorId=${result.visitorId}, action=${result.action}';
-      });
+      setState(() => _log = 'device.identify() -> visitorId=${result.visitorId}, action=${result.action}');
     } catch (err) {
       setState(() => _log = 'device.identify() failed: $err');
     }
   }
 
-  Future<void> _reportTransaction() async {
-    final protegey = _protegey;
-    if (protegey == null) {
-      setState(() => _log = 'Set an API key first.');
-      return;
-    }
-    try {
-      final result = await protegey.transactions.report(TransactionInput(
-        externalTransactionId: 'flutter-example-${DateTime.now().millisecondsSinceEpoch}',
-        externalCustomerId: _customerId,
-        direction: TransactionDirection.debit,
-        amount: 5000,
-        currency: 'XAF',
-        transactionType: 'test',
-        visitorId: _visitorId,
-      ));
-      setState(() => _log = 'transactions.report() -> decision=${result.decision}, riskScore=${result.riskScore}');
-    } catch (err) {
-      setState(() => _log = 'transactions.report() failed: $err');
-    }
-  }
+  // No "report a transaction" call here on purpose: that call belongs server-to-server, from
+  // your own backend (POST /partner-api/transactions), not from this app — see the Flutter SDK
+  // docs' Transactions section. device.identify() above is this app's whole job; as long as your
+  // backend sends the same externalCustomerId on the transaction it reports moments later,
+  // Protegey links the two automatically — nothing to relay yourself.
 
   Future<void> _reportBehavioral() async {
     final protegey = _protegey;
@@ -190,9 +170,10 @@ class _HomePageState extends State<HomePage> {
         child: ListView(
           children: [
             const Text(
-              'Demonstrates every protegey_sdk module: device intelligence, transaction reporting, '
-              'behavioral biometrics, and identity verification shown in an in-app webview — the '
-              'user never leaves this app.',
+              'Demonstrates this app\'s actual job: device intelligence, behavioral biometrics, '
+              'and identity verification shown in an in-app webview — the user never leaves this '
+              'app. Transaction reporting isn\'t shown here: it belongs server-to-server, from '
+              'your own backend.',
             ),
             const SizedBox(height: 16),
             Container(
@@ -213,8 +194,6 @@ class _HomePageState extends State<HomePage> {
             ),
             const SizedBox(height: 16),
             ElevatedButton(onPressed: _identifyDevice, child: const Text('Identify device again')),
-            const SizedBox(height: 8),
-            ElevatedButton(onPressed: _reportTransaction, child: const Text('Report a test transaction')),
             const SizedBox(height: 8),
             ElevatedButton(onPressed: _reportBehavioral, child: const Text('Report a behavioral event')),
             const SizedBox(height: 8),
