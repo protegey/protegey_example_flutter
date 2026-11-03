@@ -155,10 +155,73 @@ class _HomePageState extends State<HomePage> {
       // One call: starts the session AND shows it in a draggable bottom sheet — the user never
       // leaves this app, and there's no UI code to write for that on our end.
       final status = await protegey.kyc.presentVerification(context, externalUserId: _customerId);
-      setState(() => _log = 'KYC status -> ${status?.status ?? '(closed before a status arrived)'}');
+      if (status == null) {
+        setState(() => _log = 'KYC sheet closed before a status arrived.');
+        return;
+      }
+      setState(() => _log = 'KYC status -> ${status.status} (outcome: ${status.outcome.name})');
+      if (mounted) _showKycResultScreen(status);
     } catch (err) {
       setState(() => _log = 'kyc.startSession() failed: $err');
     }
+  }
+
+  /// The pattern a real app follows after presentVerification() resolves: switch on the typed
+  /// [KycOutcome] enum — not the raw backend status string — to decide what the user sees next.
+  /// 'success' means FaceTec's match confidence was >= your account's auto-approve threshold
+  /// (80% by default); 'manual' means it passed FaceTec's hard checks (liveness, clean document
+  /// scan) but fell below that threshold, so a human on your compliance team needs to review it —
+  /// your own dashboard shows it under "In Review"; 'failed' means a hard check itself failed.
+  void _showKycResultScreen(KycSessionStatus status) {
+    switch (status.outcome) {
+      case KycOutcome.success:
+        _showResultDialog(
+          icon: Icons.check_circle,
+          color: Colors.green,
+          title: 'Identity verified',
+          message: 'Your identity has been confirmed automatically. You can continue.',
+        );
+        break;
+      case KycOutcome.manual:
+        _showResultDialog(
+          icon: Icons.hourglass_top,
+          color: Colors.orange,
+          title: 'Pending review',
+          message: 'We received your documents. A reviewer will confirm your identity shortly — '
+              'we\'ll let you know once it\'s done.',
+        );
+        break;
+      case KycOutcome.failed:
+        _showResultDialog(
+          icon: Icons.cancel,
+          color: Colors.red,
+          title: 'Verification failed',
+          message: 'We couldn\'t verify your identity. Please try again with better lighting and '
+              'a valid, undamaged document.',
+        );
+        break;
+      case KycOutcome.unknown:
+        _showResultDialog(
+          icon: Icons.help_outline,
+          color: Colors.grey,
+          title: 'Result not available yet',
+          message: 'We couldn\'t determine the result yet. This can happen if the session is '
+              'still being processed — check back shortly.',
+        );
+        break;
+    }
+  }
+
+  void _showResultDialog({required IconData icon, required Color color, required String title, required String message}) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(icon, color: color, size: 40),
+        title: Text(title),
+        content: Text(message),
+        actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))],
+      ),
+    );
   }
 
   @override
