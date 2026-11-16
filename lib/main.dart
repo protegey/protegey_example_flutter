@@ -127,7 +127,7 @@ class _HomePageState extends State<HomePage> {
         touch: const TouchMetrics(avgSwipeVelocity: 22, scrollBehaviorScore: 0.8),
         navigation: const NavigationMetrics(screenSequence: ['login', 'dashboard', 'transfer', 'confirm']),
       ));
-      // "learning" for the first few sessions of any given customer — expected, not an error.
+      // "LEARNING" for the first few sessions of any given customer — expected, not an error.
       setState(() => _log = 'behavioral.report() -> status=${result.status}, stepUpRecommended=${result.stepUpRecommended}');
     } catch (err) {
       setState(() => _log = 'behavioral.report() failed: $err');
@@ -160,68 +160,16 @@ class _HomePageState extends State<HomePage> {
         return;
       }
       setState(() => _log = 'KYC status -> ${status.status} (outcome: ${status.outcome.name})');
-      if (mounted) _showKycResultScreen(status);
+      // presentVerification() only returns once its OWN bottom sheet has already closed (auto-
+      // close on a terminal status, or the user tapping Close) — so by the time we get here
+      // there's nothing left to dismiss. This push is a normal full-screen navigation to a
+      // dedicated results page, not a popup on top of anything.
+      if (mounted) {
+        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => KycResultPage(status: status)));
+      }
     } catch (err) {
       setState(() => _log = 'kyc.startSession() failed: $err');
     }
-  }
-
-  /// The pattern a real app follows after presentVerification() resolves: switch on the typed
-  /// [KycOutcome] enum — not the raw backend status string — to decide what the user sees next.
-  /// 'success' means FaceTec's match confidence was >= your account's auto-approve threshold
-  /// (80% by default); 'manual' means it passed FaceTec's hard checks (liveness, clean document
-  /// scan) but fell below that threshold, so a human on your compliance team needs to review it —
-  /// your own dashboard shows it under "In Review"; 'failed' means a hard check itself failed.
-  void _showKycResultScreen(KycSessionStatus status) {
-    switch (status.outcome) {
-      case KycOutcome.success:
-        _showResultDialog(
-          icon: Icons.check_circle,
-          color: Colors.green,
-          title: 'Identity verified',
-          message: 'Your identity has been confirmed automatically. You can continue.',
-        );
-        break;
-      case KycOutcome.manual:
-        _showResultDialog(
-          icon: Icons.hourglass_top,
-          color: Colors.orange,
-          title: 'Pending review',
-          message: 'We received your documents. A reviewer will confirm your identity shortly — '
-              'we\'ll let you know once it\'s done.',
-        );
-        break;
-      case KycOutcome.failed:
-        _showResultDialog(
-          icon: Icons.cancel,
-          color: Colors.red,
-          title: 'Verification failed',
-          message: 'We couldn\'t verify your identity. Please try again with better lighting and '
-              'a valid, undamaged document.',
-        );
-        break;
-      case KycOutcome.unknown:
-        _showResultDialog(
-          icon: Icons.help_outline,
-          color: Colors.grey,
-          title: 'Result not available yet',
-          message: 'We couldn\'t determine the result yet. This can happen if the session is '
-              'still being processed — check back shortly.',
-        );
-        break;
-    }
-  }
-
-  void _showResultDialog({required IconData icon, required Color color, required String title, required String message}) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        icon: Icon(icon, color: color, size: 40),
-        title: Text(title),
-        content: Text(message),
-        actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))],
-      ),
-    );
   }
 
   @override
@@ -269,6 +217,134 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// A real, full-screen page — not a popup — shown after `presentVerification()` resolves (its
+/// own sheet is already closed by then). Demonstrates reading the session info the SDK actually
+/// returns: the typed `outcome` enum for what happened, plus whatever `decision` (FaceTec's
+/// scores) the backend computed, when there is one.
+///
+/// 'success' means FaceTec's match confidence was >= your account's auto-approve threshold (80%
+/// by default); 'manual' means it passed FaceTec's hard checks (liveness, clean document scan)
+/// but fell below that threshold, so a human on your compliance team needs to review it — your
+/// own dashboard shows it under "In Review"; 'failed' means a hard check itself failed.
+class KycResultPage extends StatelessWidget {
+  final KycSessionStatus status;
+
+  const KycResultPage({super.key, required this.status});
+
+  ({IconData icon, Color color, String title, String message}) get _presentation {
+    switch (status.outcome) {
+      case KycOutcome.success:
+        return (
+          icon: Icons.check_circle,
+          color: Colors.green,
+          title: 'Identity verified',
+          message: 'Your identity has been confirmed automatically. You can continue.',
+        );
+      case KycOutcome.manual:
+        return (
+          icon: Icons.hourglass_top,
+          color: Colors.orange,
+          title: 'Pending review',
+          message: "We received your documents. A reviewer will confirm your identity shortly — we'll let you know once it's done.",
+        );
+      case KycOutcome.failed:
+        return (
+          icon: Icons.cancel,
+          color: Colors.red,
+          title: 'Verification failed',
+          message: "We couldn't verify your identity. Please try again with better lighting and a valid, undamaged document.",
+        );
+      case KycOutcome.unknown:
+        return (
+          icon: Icons.help_outline,
+          color: Colors.grey,
+          title: 'Result not available yet',
+          message: "We couldn't determine the result yet. This can happen if the session is still being processed.",
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final presentation = _presentation;
+    final decision = status.decision;
+    final livenessScore = decision?['livenessScore'];
+    final matchScore = decision?['matchScore'];
+    final confidenceScore = decision?['confidenceScore'];
+    final fullName = status.fullName;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Verification result')),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Icon(presentation.icon, color: presentation.color, size: 64),
+              const SizedBox(height: 16),
+              Text(presentation.title, textAlign: TextAlign.center, style: Theme.of(context).textTheme.headlineSmall),
+              const SizedBox(height: 8),
+              Text(presentation.message, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium),
+              const SizedBox(height: 24),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Session details', style: Theme.of(context).textTheme.titleMedium),
+                      const Divider(height: 24),
+                      _InfoRow(label: 'Status', value: status.status),
+                      _InfoRow(label: 'Outcome', value: status.outcome.name),
+                      if (fullName is String) _InfoRow(label: 'Full name', value: fullName),
+                      if (livenessScore is num) _InfoRow(label: 'Liveness score', value: '${livenessScore.round()}%'),
+                      if (matchScore is num) _InfoRow(label: 'Match score', value: '${matchScore.round()}%'),
+                      if (confidenceScore is num) _InfoRow(label: 'Confidence', value: '${(confidenceScore * 100).round()}%'),
+                      _InfoRow(label: 'Session ID', value: status.sessionId, mono: true),
+                      if (status.externalUserId != null) _InfoRow(label: 'External user ID', value: status.externalUserId!, mono: true),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Done')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool mono;
+
+  const _InfoRow({required this.label, required this.value, this.mono = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: Colors.grey.shade600)),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: TextStyle(fontFamily: mono ? 'monospace' : null, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }
