@@ -101,7 +101,7 @@ class _HomePageState extends State<HomePage> {
     }
     try {
       final result = await protegey.device.identify(externalCustomerId: _customerId);
-      setState(() => _log = 'device.identify() -> visitorId=${result.visitorId}, action=${result.action}');
+      setState(() => _log = 'device.identify() -> visitorId=${result.visitorId}, action=${result.action?.name}, riskScore=${result.riskScore}');
     } catch (err) {
       setState(() => _log = 'device.identify() failed: $err');
     }
@@ -273,8 +273,8 @@ class KycResultPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final presentation = _presentation;
     final decision = status.decision;
-    final livenessScore = decision?['livenessScore'];
-    final matchScore = decision?['matchScore'];
+    final livenessScore = status.livenessScore;
+    final matchScore = status.faceMatchScore;
     final confidenceScore = decision?['confidenceScore'];
     final fullName = status.fullName;
 
@@ -303,8 +303,8 @@ class KycResultPage extends StatelessWidget {
                       _InfoRow(label: 'Status', value: status.status),
                       _InfoRow(label: 'Outcome', value: status.outcome.name),
                       if (fullName is String) _InfoRow(label: 'Full name', value: fullName),
-                      if (livenessScore is num) _InfoRow(label: 'Liveness score', value: '${livenessScore.round()}%'),
-                      if (matchScore is num) _InfoRow(label: 'Match score', value: '${matchScore.round()}%'),
+                      if (livenessScore != null) _InfoRow(label: 'Liveness score', value: '${livenessScore.round()}%'),
+                      if (matchScore != null) _InfoRow(label: 'Match score', value: '${matchScore.round()}%'),
                       if (confidenceScore is num) _InfoRow(label: 'Confidence', value: '${(confidenceScore * 100).round()}%'),
                       _InfoRow(label: 'Session ID', value: status.sessionId, mono: true),
                       if (status.externalUserId != null) _InfoRow(label: 'External user ID', value: status.externalUserId!, mono: true),

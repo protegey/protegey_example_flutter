@@ -8,7 +8,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Protegey — Flutter example'), findsWidgets);
-    expect(find.text('Report a test transaction'), findsOneWidget);
+    expect(find.text('Report a behavioral event'), findsOneWidget);
     expect(find.text('Verify my identity'), findsOneWidget);
   });
 }
