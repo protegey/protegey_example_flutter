@@ -113,6 +113,65 @@ class _HomePageState extends State<HomePage> {
   // backend sends the same externalCustomerId on the transaction it reports moments later,
   // Protegey links the two automatically — nothing to relay yourself.
 
+  // Sandbox demo only: like transactions, a cash deposit is reported server-to-server in
+  // production (your teller/agent system holds the authoritative data). Shown here so you can see
+  // the request/response shape against a sandbox key.
+  Future<void> _recordCashDeposit() async {
+    final protegey = _protegey;
+    if (protegey == null) {
+      setState(() => _log = 'Set an API key first.');
+      return;
+    }
+    // Your own reference — reusing it is rejected with a 409, which makes retries safe.
+    final reference = 'dep-${DateTime.now().millisecondsSinceEpoch}';
+    try {
+      final recorded = await protegey.cashDeposits.record(CashDepositInput(
+        externalTransactionId: reference,
+        externalCustomerId: _customerId,
+        amount: 2500000,
+        currency: 'XOF',
+        channel: TransactionChannel.branch,
+        branchId: 'DKR-PLATEAU',
+        depositorName: 'Awa Diallo',
+      ));
+      // Look it up again by our own reference — the amount comes back as a decimal string.
+      final deposit = await protegey.cashDeposits.get(reference);
+      setState(() => _log = 'cashDeposits.record() -> decision=${recorded.decision}, riskScore=${recorded.riskScore}, '
+          'alerts=${recorded.alerts.length}\ncashDeposits.get($reference) -> amount=${deposit.amount} ${deposit.currency}, '
+          'channel=${deposit.channel}, decision=${deposit.decision}');
+    } on ProtegeyApiException catch (err) {
+      setState(() => _log = err.status == 409 ? 'Duplicate externalTransactionId (409): $err' : 'cashDeposits failed: $err');
+    } catch (err) {
+      setState(() => _log = 'cashDeposits failed: $err');
+    }
+  }
+
+  // Finds this customer's KYC sessions by our own id (exact match) and opens the latest one.
+  Future<void> _lookUpKycSessions() async {
+    final protegey = _protegey;
+    if (protegey == null) {
+      setState(() => _log = 'Set an API key first.');
+      return;
+    }
+    try {
+      final page = await protegey.kyc.listSessions(externalUserId: _customerId, limit: 20);
+      if (page.data.isEmpty) {
+        setState(() => _log = 'kyc.listSessions(externalUserId: $_customerId) -> no session yet. Tap "Verify my identity" first.');
+        return;
+      }
+      final latest = page.data.first;
+      setState(() => _log = 'kyc.listSessions() -> ${page.total} session(s); latest: status=${latest.status}, '
+          'recommendation=${latest.recommendation?.name ?? '-'}');
+      // Re-fetch the full session: scores, and fresh 1-hour photo links.
+      final status = await protegey.kyc.getSession(latest.sessionId);
+      if (mounted) {
+        await Navigator.of(context).push(MaterialPageRoute(builder: (_) => KycResultPage(status: status)));
+      }
+    } catch (err) {
+      setState(() => _log = 'kyc.listSessions() failed: $err');
+    }
+  }
+
   Future<void> _reportBehavioral() async {
     final protegey = _protegey;
     if (protegey == null) {
@@ -159,7 +218,7 @@ class _HomePageState extends State<HomePage> {
         setState(() => _log = 'KYC sheet closed before a status arrived.');
         return;
       }
-      setState(() => _log = 'KYC status -> ${status.status} (outcome: ${status.outcome.name})');
+      setState(() => _log = 'KYC status -> ${status.status} (outcome: ${status.outcome.name}, recommendation: ${status.recommendation?.name ?? '-'})');
       // presentVerification() only returns once its OWN bottom sheet has already closed (auto-
       // close on a terminal status, or the user tapping Close) — so by the time we get here
       // there's nothing left to dismiss. This push is a normal full-screen navigation to a
@@ -184,7 +243,7 @@ class _HomePageState extends State<HomePage> {
               'Demonstrates this app\'s actual job: device intelligence, behavioral biometrics, '
               'and identity verification shown in an in-app webview — the user never leaves this '
               'app. Transaction reporting isn\'t shown here: it belongs server-to-server, from '
-              'your own backend.',
+              'your own backend. The cash deposit button is a sandbox demo of that same kind of call.',
             ),
             const SizedBox(height: 16),
             Container(
@@ -209,6 +268,10 @@ class _HomePageState extends State<HomePage> {
             ElevatedButton(onPressed: _reportBehavioral, child: const Text('Report a behavioral event')),
             const SizedBox(height: 8),
             ElevatedButton(onPressed: _startKyc, child: const Text('Verify my identity')),
+            const SizedBox(height: 8),
+            ElevatedButton(onPressed: _lookUpKycSessions, child: const Text('Look up my KYC sessions')),
+            const SizedBox(height: 8),
+            OutlinedButton(onPressed: _recordCashDeposit, child: const Text('Record a cash deposit (sandbox demo)')),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
@@ -277,6 +340,14 @@ class KycResultPage extends StatelessWidget {
     final matchScore = status.faceMatchScore;
     final confidenceScore = decision?['confidenceScore'];
     final fullName = status.fullName;
+    final recommendation = status.recommendation;
+    final images = status.images;
+    // Pre-signed links, valid 1 hour and re-issued on every getSession() — never store them.
+    final photos = <(String, KycImage?)>[
+      ('Document', images?.documentFront),
+      ('Selfie', images?.selfie),
+      ('ID photo', images?.documentFaceCrop),
+    ].where((p) => p.$2 != null).toList();
 
     return Scaffold(
       appBar: AppBar(title: const Text('Verification result')),
@@ -302,6 +373,8 @@ class KycResultPage extends StatelessWidget {
                       const Divider(height: 24),
                       _InfoRow(label: 'Status', value: status.status),
                       _InfoRow(label: 'Outcome', value: status.outcome.name),
+                      // Protegey's verdict; status above is the final decision (can differ after a manual review).
+                      if (recommendation != null) _InfoRow(label: 'Recommendation', value: recommendation.name.toUpperCase()),
                       if (fullName is String) _InfoRow(label: 'Full name', value: fullName),
                       if (livenessScore != null) _InfoRow(label: 'Liveness score', value: '${livenessScore.round()}%'),
                       if (matchScore != null) _InfoRow(label: 'Match score', value: '${matchScore.round()}%'),
@@ -312,6 +385,39 @@ class KycResultPage extends StatelessWidget {
                   ),
                 ),
               ),
+              if (photos.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text('Photos', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 140,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final (label, image) in photos)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 12),
+                          child: SizedBox(
+                            width: 100,
+                            child: Column(
+                              children: [
+                                Expanded(
+                                  child: Image.network(
+                                    image!.url,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => const Icon(Icons.broken_image),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(label, style: Theme.of(context).textTheme.bodySmall),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
               ElevatedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Done')),
             ],
