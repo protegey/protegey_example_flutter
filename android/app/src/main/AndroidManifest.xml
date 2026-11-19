@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- The in-app KYC webview (ProtegeyKycView) needs this so the WebView can grant camera
-         access to the biometric capture page it loads — without it, every getUserMedia
+         access to the Protegey verification page it loads — without it, every getUserMedia
          request from that page fails regardless of what the app itself does. -->
     <uses-permission android:name="android.permission.CAMERA" />
     <application

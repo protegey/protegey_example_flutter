@@ -287,11 +287,11 @@ class _HomePageState extends State<HomePage> {
 
 /// A real, full-screen page — not a popup — shown after `presentVerification()` resolves (its
 /// own sheet is already closed by then). Demonstrates reading the session info the SDK actually
-/// returns: the typed `outcome` enum for what happened, plus whatever `decision` (biometric's
-/// scores) the backend computed, when there is one.
+/// returns: the typed `outcome` enum for what happened, plus whatever `decision` (Protegey liveness /
+/// face match scores) the backend computed, when there is one.
 ///
-/// 'success' means biometric's match confidence was >= your account's auto-approve threshold (80%
-/// by default); 'manual' means it passed biometric's hard checks (liveness, clean document scan)
+/// 'success' means the Protegey face match confidence was >= your account's auto-approve threshold (80%
+/// by default); 'manual' means it passed the hard checks (liveness, clean document scan)
 /// but fell below that threshold, so a human on your compliance team needs to review it — your
 /// own dashboard shows it under "In Review"; 'failed' means a hard check itself failed.
 class KycResultPage extends StatelessWidget {
