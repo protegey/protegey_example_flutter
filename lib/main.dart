@@ -11,9 +11,10 @@ const _defaultBaseUrl = String.fromEnvironment('PROTEGEY_BASE_URL', defaultValue
 
 const _prefsApiKeyKey = 'protegey_example_api_key';
 const _prefsBaseUrlKey = 'protegey_example_base_url';
+const _prefsCustomerIdKey = 'protegey_example_customer_id';
 
 // A fresh id per demo run — real integrations pass the end user's own stable id instead.
-final _customerId = 'customer-${Random().nextInt(999999).toRadixString(36)}';
+final _randomCustomerId = 'customer-${Random().nextInt(999999).toRadixString(36)}';
 final _sessionId = 'flutter-example-session-${DateTime.now().millisecondsSinceEpoch}';
 
 void main() {
@@ -47,6 +48,10 @@ class _HomePageState extends State<HomePage> {
   Protegey? _protegey;
   final _apiKeyController = TextEditingController();
   final _baseUrlController = TextEditingController();
+  // Editable and remembered across launches: a re-verification (3D:3D) must use the SAME customer
+  // id as that person's earlier KYC — a fresh random id on every launch could never match.
+  final _customerIdController = TextEditingController(text: _randomCustomerId);
+  String get _customerId => _customerIdController.text.trim().isEmpty ? _randomCustomerId : _customerIdController.text.trim();
   String _log = 'Waiting for device.identify()…';
 
   @override
@@ -66,6 +71,8 @@ class _HomePageState extends State<HomePage> {
   // handy for testing against staging vs. production, or a different demo partner.
   Future<void> _loadSavedCredentials() async {
     final prefs = await SharedPreferences.getInstance();
+    final savedCustomerId = prefs.getString(_prefsCustomerIdKey);
+    if (savedCustomerId != null && savedCustomerId.isNotEmpty) _customerIdController.text = savedCustomerId;
     final savedKey = prefs.getString(_prefsApiKeyKey);
     final savedUrl = prefs.getString(_prefsBaseUrlKey);
     if (savedKey == null || savedKey.isEmpty) return;
@@ -86,6 +93,7 @@ class _HomePageState extends State<HomePage> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsApiKeyKey, apiKey);
     await prefs.setString(_prefsBaseUrlKey, _baseUrlController.text);
+    await prefs.setString(_prefsCustomerIdKey, _customerId);
     setState(() {
       _protegey = Protegey(apiKey: apiKey, baseUrl: _baseUrlController.text);
       _log = 'Switched to baseUrl=${_baseUrlController.text}';
@@ -231,6 +239,61 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  Future<void> _saveCustomerId() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsCustomerIdKey, _customerId);
+  }
+
+  /// 3D liveness (selfie only, billed per proven check) — and its re-verification variant, which
+  /// matches the face against this customer's KYC. Separate from KYC.
+  Future<void> _startLiveness({required bool reverify}) async {
+    final protegey = _protegey;
+    if (protegey == null) {
+      setState(() => _log = 'Set an API key first.');
+      return;
+    }
+    await _saveCustomerId();
+    final cameraStatus = await Permission.camera.request();
+    if (!cameraStatus.isGranted) {
+      setState(() => _log = 'Camera permission denied — the 3D liveness check needs the camera.');
+      return;
+    }
+    if (!mounted) return;
+    try {
+      final LivenessSession? session;
+      if (reverify) {
+        session = await protegey.liveness.presentReverification(context, externalUserId: _customerId);
+      } else {
+        session = await protegey.liveness.presentLiveness(context, externalUserId: _customerId);
+      }
+      if (session == null) {
+        setState(() => _log = 'Liveness sheet closed before a result.');
+        return;
+      }
+      final finished = session;
+      final result = finished.livenessProven == null
+          ? 'no result yet'
+          : finished.livenessProven == false
+              ? 'inconclusive scan'
+              : reverify
+                  ? (finished.matched == true ? 'SAME person as the KYC (match level ${finished.matchLevel})' : 'DIFFERENT person (match level ${finished.matchLevel})')
+                  : 'live person';
+      setState(() => _log = '${reverify ? 'liveness.presentReverification' : 'liveness.presentLiveness'}(externalUserId: $_customerId)\n'
+          '-> status=${finished.status}, result=$result, attempts=${finished.attempts}, billed=${finished.billableChecks} check(s) = ${finished.amount} USD');
+    } on ProtegeyApiException catch (err) {
+      if (err.errorCode == no3dEnrollmentErrorCode) {
+        setState(() => _log = 'No 3D record (KYC) exists for "$_customerId".\nRun "Verify my identity" with this customer ID first, then re-verify.');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No 3D record (KYC) exists for "$_customerId" — verify their identity first.')));
+        }
+        return;
+      }
+      setState(() => _log = 'liveness failed: $err');
+    } catch (err) {
+      setState(() => _log = 'liveness failed: $err');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -263,6 +326,17 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 16),
+            const Text('Customer ID (externalUserId)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            TextField(
+              controller: _customerIdController,
+              onSubmitted: (_) => _saveCustomerId(),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(),
+                helperText: 'Kept across launches. Use the same ID for "Verify my identity" and "Re-verify me".',
+              ),
+            ),
+            const SizedBox(height: 16),
             ElevatedButton(onPressed: _identifyDevice, child: const Text('Identify device again')),
             const SizedBox(height: 8),
             ElevatedButton(onPressed: _reportBehavioral, child: const Text('Report a behavioral event')),
@@ -270,6 +344,10 @@ class _HomePageState extends State<HomePage> {
             ElevatedButton(onPressed: _startKyc, child: const Text('Verify my identity')),
             const SizedBox(height: 8),
             ElevatedButton(onPressed: _lookUpKycSessions, child: const Text('Look up my KYC sessions')),
+            const SizedBox(height: 8),
+            FilledButton.icon(onPressed: () => _startLiveness(reverify: false), icon: const Icon(Icons.face_retouching_natural), label: const Text('3D liveness check')),
+            const SizedBox(height: 8),
+            FilledButton.tonalIcon(onPressed: () => _startLiveness(reverify: true), icon: const Icon(Icons.verified_user), label: const Text('Re-verify me (3D:3D vs my KYC)')),
             const SizedBox(height: 8),
             OutlinedButton(onPressed: _recordCashDeposit, child: const Text('Record a cash deposit (sandbox demo)')),
             const SizedBox(height: 16),
