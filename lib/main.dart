@@ -48,7 +48,7 @@ class _HomePageState extends State<HomePage> {
   Protegey? _protegey;
   final _apiKeyController = TextEditingController();
   final _baseUrlController = TextEditingController();
-  // Editable and remembered across launches: a re-verification (3D:3D) must use the SAME customer
+  // Editable and remembered across launches: a re-verification (face match) must use the SAME customer
   // id as that person's earlier KYC — a fresh random id on every launch could never match.
   final _customerIdController = TextEditingController(text: _randomCustomerId);
   String get _customerId => _customerIdController.text.trim().isEmpty ? _randomCustomerId : _customerIdController.text.trim();
@@ -347,7 +347,7 @@ class _HomePageState extends State<HomePage> {
             const SizedBox(height: 8),
             FilledButton.icon(onPressed: () => _startLiveness(reverify: false), icon: const Icon(Icons.face_retouching_natural), label: const Text('3D liveness check')),
             const SizedBox(height: 8),
-            FilledButton.tonalIcon(onPressed: () => _startLiveness(reverify: true), icon: const Icon(Icons.verified_user), label: const Text('Re-verify me (3D:3D vs my KYC)')),
+            FilledButton.tonalIcon(onPressed: () => _startLiveness(reverify: true), icon: const Icon(Icons.verified_user), label: const Text('Re-verify me (face match vs my KYC)')),
             const SizedBox(height: 8),
             OutlinedButton(onPressed: _recordCashDeposit, child: const Text('Record a cash deposit (sandbox demo)')),
             const SizedBox(height: 16),
