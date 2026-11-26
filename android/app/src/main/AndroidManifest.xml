@@ -4,6 +4,8 @@
          access to the Protegey verification page it loads — without it, every getUserMedia
          request from that page fails regardless of what the app itself does. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <application
         android:label="protegey_example_flutter"
         android:name="${applicationName}"

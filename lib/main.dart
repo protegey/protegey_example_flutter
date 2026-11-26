@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:protegey_sdk/protegey_sdk.dart';
+import 'package:protegey_sdk_location/protegey_sdk_location.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // In a real app, read these from your own build config — never hardcode a production API key.
@@ -52,6 +53,7 @@ class _HomePageState extends State<HomePage> {
   // id as that person's earlier KYC — a fresh random id on every launch could never match.
   final _customerIdController = TextEditingController(text: _randomCustomerId);
   String get _customerId => _customerIdController.text.trim().isEmpty ? _randomCustomerId : _customerIdController.text.trim();
+  final _amountController = TextEditingController(text: '15000');
   String _log = 'Waiting for device.identify()…';
 
   @override
@@ -115,11 +117,85 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // No "report a transaction" call here on purpose: that call belongs server-to-server, from
-  // your own backend (POST /partner-api/transactions), not from this app — see the Flutter SDK
-  // docs' Transactions section. device.identify() above is this app's whole job; as long as your
-  // backend sends the same externalCustomerId on the transaction it reports moments later,
-  // Protegey links the two automatically — nothing to relay yourself.
+  // Sandbox demo only: in production a transaction is reported server-to-server, from your own
+  // backend (POST /partner-api/transactions) — see the Flutter SDK docs' Transactions section.
+  // Shown here to demo the optional GPS position: the user is asked first, and only a "yes"
+  // reads the position (and shows the OS permission prompt if it hasn't been answered yet).
+  Future<void> _makeTransaction() async {
+    final protegey = _protegey;
+    if (protegey == null) {
+      setState(() => _log = 'Set an API key first.');
+      return;
+    }
+    final amount = num.tryParse(_amountController.text.replaceAll(RegExp(r'[\s,]'), ''));
+    if (amount == null || amount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter an amount greater than 0.')));
+      return;
+    }
+    final useLocation = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.location_on_outlined),
+        title: const Text('Use your location?'),
+        content: const Text('Sharing your position with this payment helps us spot fraud, such as someone '
+            'using your account from another city. It is only used for this check.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('No, continue without')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Yes, use my location')),
+        ],
+      ),
+    );
+    if (useLocation == null || !mounted) return; // dismissed: no transaction
+
+    DeviceLocation? location;
+    if (useLocation) {
+      // The user just said yes, so a few seconds for a precise GPS fix is acceptable here.
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const AlertDialog(
+          content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Text('Reading your position…')]),
+        ),
+      );
+      location = await ProtegeyLocation.current(requestPermission: true, timeout: const Duration(seconds: 5));
+      if (mounted) Navigator.of(context).pop();
+      if (location == null && mounted) {
+        final blocked = await Permission.locationWhenInUse.isPermanentlyDenied;
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(blocked
+              ? 'Location is turned off for this app — the payment is sent without it.'
+              : 'No position available (permission refused or location off) — the payment is sent without it.'),
+          action: blocked ? const SnackBarAction(label: 'Settings', onPressed: openAppSettings) : null,
+        ));
+      }
+    }
+
+    final reference = 'txn-${DateTime.now().millisecondsSinceEpoch}';
+    try {
+      final result = await protegey.transactions.report(TransactionInput(
+        externalTransactionId: reference,
+        externalCustomerId: _customerId,
+        direction: TransactionDirection.debit,
+        amount: amount,
+        currency: 'XOF',
+        transactionType: 'transfer',
+        channel: TransactionChannel.mobileApp,
+        location: location,
+      ));
+      setState(() => _log = 'transactions.report($reference) -> decision=${result.decision}, riskScore=${result.riskScore}, '
+          'alerts=${result.alerts.length}, location=${result.location == null ? 'none' : 'used'}');
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (_) => _TransactionResultSheet(reference: reference, amount: amount, sent: location, result: result),
+      );
+    } catch (err) {
+      setState(() => _log = 'transactions.report() failed: $err');
+    }
+  }
 
   // Sandbox demo only: like transactions, a cash deposit is reported server-to-server in
   // production (your teller/agent system holds the authoritative data). Shown here so you can see
@@ -305,8 +381,9 @@ class _HomePageState extends State<HomePage> {
             const Text(
               'Demonstrates this app\'s actual job: device intelligence, behavioral biometrics, '
               'and identity verification shown in an in-app webview — the user never leaves this '
-              'app. Transaction reporting isn\'t shown here: it belongs server-to-server, from '
-              'your own backend. The cash deposit button is a sandbox demo of that same kind of call.',
+              'app. In production, transactions and cash deposits are reported server-to-server, from '
+              'your own backend: their buttons here send those calls to the API set below (the '
+              'transaction one shows the optional GPS position).',
             ),
             const SizedBox(height: 16),
             Container(
@@ -337,6 +414,14 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
             const SizedBox(height: 16),
+            TextField(
+              controller: _amountController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), labelText: 'Transaction amount', suffixText: 'XOF'),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(onPressed: _makeTransaction, icon: const Icon(Icons.send), label: const Text('Make a transaction')),
+            const SizedBox(height: 8),
             ElevatedButton(onPressed: _identifyDevice, child: const Text('Identify device again')),
             const SizedBox(height: 8),
             ElevatedButton(onPressed: _reportBehavioral, child: const Text('Report a behavioral event')),
@@ -500,6 +585,81 @@ class KycResultPage extends StatelessWidget {
               ElevatedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Done')),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What was sent and what Protegey made of it, right after `transactions.report()`.
+class _TransactionResultSheet extends StatelessWidget {
+  final String reference;
+  final num amount;
+  final DeviceLocation? sent;
+  final ReportTransactionResult result;
+
+  const _TransactionResultSheet({required this.reference, required this.amount, required this.sent, required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final sent = this.sent;
+    final used = result.location;
+    final decisionColor = switch (result.decision) {
+      'CLEAR' => Colors.green,
+      'BLOCKED' => Colors.red,
+      _ => Colors.orange,
+    };
+    String yesNo(bool? value) => value == null ? '-' : (value ? 'Yes' : 'No');
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Text('Transaction sent', style: theme.textTheme.titleLarge),
+                const Spacer(),
+                Chip(
+                  label: Text(result.decision, style: TextStyle(color: decisionColor, fontWeight: FontWeight.w700)),
+                  side: BorderSide(color: decisionColor),
+                ),
+              ],
+            ),
+            _InfoRow(label: 'Amount', value: '$amount XOF'),
+            _InfoRow(label: 'Risk score', value: '${result.riskScore} / 100'),
+            _InfoRow(label: 'Alerts', value: '${result.alerts.length}'),
+            _InfoRow(label: 'Reference', value: reference, mono: true),
+            const Divider(height: 32),
+            Row(
+              children: [
+                Icon(used == null ? Icons.location_off_outlined : Icons.location_on, color: used == null ? Colors.grey : theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text(used == null ? 'Sent without location' : 'Location taken into account', style: theme.textTheme.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (sent != null) ...[
+              Text('Read on this phone', style: theme.textTheme.labelLarge),
+              _InfoRow(label: 'Position', value: '${sent.latitude.toStringAsFixed(6)}, ${sent.longitude.toStringAsFixed(6)}', mono: true),
+              _InfoRow(label: 'Accuracy', value: sent.accuracyMeters == null ? '-' : '± ${sent.accuracyMeters!.round()} m'),
+              if (sent.capturedAt != null) _InfoRow(label: 'Taken at', value: TimeOfDay.fromDateTime(sent.capturedAt!.toLocal()).format(context)),
+              const SizedBox(height: 12),
+            ],
+            if (used != null) ...[
+              Text('Used by Protegey (stored rounded to ~100 m)', style: theme.textTheme.labelLarge),
+              _InfoRow(label: 'Position', value: '${used.latitude ?? '-'}, ${used.longitude ?? '-'}', mono: true),
+              _InfoRow(label: 'Fake GPS', value: yesNo(used.isMocked)),
+              _InfoRow(label: 'Distance from IP address', value: used.gpsIpDistanceKm == null ? 'unknown' : '${used.gpsIpDistanceKm} km'),
+              _InfoRow(label: 'Travel speed since last position', value: used.impliedTravelSpeedKmh == null ? 'first position' : '${used.impliedTravelSpeedKmh} km/h'),
+              _InfoRow(label: 'New area for this customer', value: yesNo(used.isNewGpsArea)),
+            ] else
+              Text('No position was used for this transaction.', style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 24),
+            FilledButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Done')),
+          ],
         ),
       ),
     );

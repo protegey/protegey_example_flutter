@@ -41,6 +41,12 @@ dependencies:
     git:
       url: https://github.com/protegey/protegey_flutter_sdk.git
       ref: main
+  # Optional GPS add-on — only needed because this demo sends the position with a transaction.
+  protegey_sdk_location:
+    git:
+      url: https://github.com/protegey/protegey_flutter_sdk.git
+      path: protegey_sdk_location
+      ref: main
 
 dev_dependencies:
   flutter_test:
