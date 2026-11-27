@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -112,6 +113,10 @@ class _HomePageState extends State<HomePage> {
     try {
       final result = await protegey.device.identify(externalCustomerId: _customerId);
       setState(() => _log = 'device.identify() -> visitorId=${result.visitorId}, action=${result.action?.name}, riskScore=${result.riskScore}');
+      // Silent, as in production: sends the position only if the location permission is already
+      // granted (never prompts), shows nothing, never throws. A transaction reported for this
+      // customer within ~15 minutes reuses it.
+      unawaited(protegey.location.update(externalCustomerId: _customerId));
     } catch (err) {
       setState(() => _log = 'device.identify() failed: $err');
     }
